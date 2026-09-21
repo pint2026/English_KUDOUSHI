@@ -85,6 +85,17 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
 .bar-import{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:12px;display:none}
 .bar-import i{display:block;height:100%;width:0;background:var(--ok)}
 .hidden{display:none!important}
+.ans .head .en mark{background:linear-gradient(transparent 58%,var(--mark) 58%);color:inherit;padding:0 1px}
+.ans .head .en{background:none}
+.verb{display:inline-block;font-size:.78rem;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 9px;margin-top:6px}
+.search{margin:12px 0 6px}
+.list{display:flex;flex-direction:column;gap:8px;padding-bottom:20px}
+.li{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;text-align:left;cursor:pointer;width:100%}
+.li .p{font-family:var(--en);font-size:1.02rem;font-weight:700}
+.li .pj{font-size:.9rem;color:var(--muted)}
+.li .ex{display:none;margin-top:6px;font-size:.9rem}
+.li.open .ex{display:block}
+.li .n{float:right;font-size:.75rem;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -119,7 +130,7 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
     <button class="btn" id="btn-start">練習を始める</button>
     <button class="btn ghost" id="btn-listen">聞き流しを始める</button>
   </div>
-  <div class="links"><button id="btn-settings">設定とバックアップ</button></div>
+  <div class="links"><button id="btn-list">フレーズ一覧</button><button id="btn-settings">設定とバックアップ</button></div>
 </section>
 
 <!-- 練習 -->
@@ -131,9 +142,10 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
     <div class="hint" id="hint">頭の中で訳してから、答えを見てください</div>
     <div class="ans" id="ans">
       <div><span class="head"><span class="en" id="a-head"></span></span><span class="hja" id="a-hja"></span></div>
+      <div><span class="verb" id="a-verb"></span></div>
       <div class="s-en en" id="a-en"></div>
       <div class="s-ja" id="a-ja"></div>
-      <div class="again"><button class="chip" id="p-en">英語を聞く</button><button class="chip" id="p-ja">日本語を聞く</button><button class="chip" id="p-head">見出しを聞く</button></div>
+      <div class="again"><button class="chip" id="p-phrase">フレーズ（英）</button><button class="chip" id="p-verb">句動詞だけ</button><button class="chip" id="p-en">例文（英）</button><button class="chip" id="p-ja">和訳</button></div>
     </div>
   </div>
   <button class="btn" id="btn-reveal">答えを見る</button>
@@ -157,12 +169,22 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
     <div class="qlabel" id="lstate"></div>
     <div class="ans on" style="text-align:left">
       <div><span class="head"><span class="en" id="l-head"></span></span><span class="hja" id="l-hja"></span></div>
+      <div><span class="verb" id="l-verb"></span></div>
       <div class="s-en en" id="l-en"></div>
       <div class="s-ja" id="l-ja"></div>
     </div>
     <p class="sub" style="margin-top:14px">画面をつけたままにしてください。画面が消えると止まります。</p>
   </div>
   <div class="row"><button class="btn ghost" id="btn-lpause">一時停止</button><button class="btn ghost" id="btn-lnext">次へ</button></div>
+</section>
+
+<!-- 一覧 -->
+<section class="screen" id="s-list">
+  <div class="top"><button class="x" id="btn-lback">戻る</button></div>
+  <h1>フレーズ一覧</h1>
+  <p class="sub">タップすると英語のフレーズを読み上げ、例文を表示します</p>
+  <input class="search" type="search" id="q" placeholder="英語か日本語で探す（例：break、故障）" style="width:100%;font:inherit;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card);color:var(--text)">
+  <div class="list" id="list"></div>
 </section>
 
 <!-- 設定 -->
@@ -181,7 +203,7 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
     <button class="btn ghost" id="btn-export">学習記録を書き出す</button>
     <input type="file" id="bkfile" accept=".json,application/json" class="hidden">
     <button class="btn ghost" id="btn-import">学習記録を読み込む</button>
-    <button class="btn ghost" id="btn-repack">教材パックを読み込み直す</button>
+    <button class="btn ghost" id="btn-repack">教材パック・データ更新を読み込む</button>
   </div>
   <p class="sub" id="s-msg" style="margin-top:10px"></p>
 </section>
@@ -190,6 +212,7 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 "use strict";
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
 /* ---------- 保存（IndexedDB） ---------- */
 const DB={db:null,
   open(){return new Promise((res,rej)=>{const r=indexedDB.open("kudoushi",1);
@@ -206,9 +229,9 @@ const DB={db:null,
 /* ---------- 練習の種類 ---------- */
 const MODES=[
   {id:"e2j",name:"英文 → 日本語",dir:"英語の例文を聞いて日本語に"},
-  {id:"p2j",name:"句動詞 → 日本語",dir:"英語の句動詞だけ聞いて日本語に"},
+  {id:"p2j",name:"フレーズ → 日本語",dir:"英語のフレーズを聞いて日本語に"},
   {id:"j2e",name:"和文 → 英語",dir:"日本語の文を聞いて英語に"},
-  {id:"q2e",name:"日本語の意味 → 句動詞",dir:"日本語の意味を聞いて英語の句動詞に"}
+  {id:"q2e",name:"日本語 → フレーズ",dir:"日本語のフレーズを聞いて英語に"}
 ];
 const INTERVALS=[0,1,3,7,14,30,60]; // 箱ごとの次回までの日数
 const MASTER_BOX=4;                 // 4回連続で「覚えた」（間隔をあけて）でマスター
@@ -231,19 +254,34 @@ function stopAll(){try{player.pause()}catch(e){} try{speechSynthesis.cancel()}ca
 function playClip(name){return new Promise(async res=>{stopAll(); const u=await clipURL(name); if(!u)return res();
   player.onended=()=>res(); player.onerror=()=>res(); player.src=u; player.currentTime=0;
   const p=player.play(); if(p&&p.catch)p.catch(()=>res());});}
-let jaVoice=null;
+let jaVoice=null, enVoice=null;
 function pickVoice(){const v=speechSynthesis.getVoices().filter(v=>/^ja/i.test(v.lang));
-  jaVoice=v.find(x=>/Kyoko|O-ren|Hattori|Siri/i.test(x.name))||v[0]||null;}
+  jaVoice=v.find(x=>/Kyoko|O-ren|Hattori|Siri/i.test(x.name))||v[0]||null;
+  const e=speechSynthesis.getVoices().filter(v=>/^en[-_]US/i.test(v.lang));
+  enVoice=e.find(x=>/Samantha|Ava|Allison|Nicky|Siri/i.test(x.name))||e[0]||null;}
 if("speechSynthesis" in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice;}
 function speakJa(text){return new Promise(res=>{stopAll(); if(!("speechSynthesis" in window))return res();
   const u=new SpeechSynthesisUtterance(text); u.lang="ja-JP"; if(jaVoice)u.voice=jaVoice; u.rate=Number(SET.rate)||1;
   u.onend=()=>res(); u.onerror=()=>res(); speechSynthesis.speak(u); setTimeout(res, 3000+text.length*350);});}
+function speakEn(text){return new Promise(res=>{stopAll(); if(!("speechSynthesis" in window))return res();
+  const u=new SpeechSynthesisUtterance(text); u.lang="en-US"; if(enVoice)u.voice=enVoice; u.rate=(Number(SET.rate)||1)*0.95;
+  u.onend=()=>res(); u.onerror=()=>res(); speechSynthesis.speak(u); setTimeout(res, 3000+text.length*120);});}
 const aName=it=>`a/${String(it.id).padStart(3,"0")}.mp3`, hName=it=>`h/${it.file}.mp3`;
-function playQuestion(mode,it){ if(mode==="e2j")return playClip(aName(it)); if(mode==="p2j")return playClip(hName(it));
+function playQuestion(mode,it){ if(mode==="e2j")return playClip(aName(it)); if(mode==="p2j")return speakEn(it.head);
   if(mode==="j2e")return speakJa(it.ja); return speakJa(it.headJa);}
 function playAnswer(mode,it){ if(mode==="e2j")return speakJa(it.ja); if(mode==="p2j")return speakJa(it.headJa);
-  if(mode==="j2e")return playClip(aName(it)); return playClip(hName(it));}
+  if(mode==="j2e")return playClip(aName(it)); return speakEn(it.head).then(()=>wait(400)).then(()=>playClip(hName(it)));}
 
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+const IRR={bring:["brought"],build:["built"],come:["came"],get:["got","gotten"],give:["gave","given"],go:["went","gone","going"],hold:["held"],keep:["kept"],make:["made"],put:["put"],run:["ran"],set:["set"],sit:["sat"],stand:["stood"],take:["took","taken"],lay:["laid"],lead:["led"],leave:["left"],hear:["heard"],hang:["hung"],throw:["thrown","threw"],wake:["woke"],break:["broke","broken"],blow:["blew"],fall:["fell"],meet:["met"],speak:["spoken"],draw:["drew"],deal:["dealt"],find:["found"],grow:["grew"],shut:["shut"],cut:["cut"],let:["let"],sell:["sold"]};
+function markVerb(phrase,verb){
+  if(!verb) return esc(phrase);
+  const vt=verb.toLowerCase().split(/\s+/), words=phrase.split(/(\s+)/); let vi=0;
+  return words.map(w=>{ if(/^\s+$/.test(w)||vi>=vt.length) return esc(w);
+    const lw=w.toLowerCase().replace(/[^a-z']/g,""), t=vt[vi];
+    const forms=[t,t+"s",t+"es",t+"ed",t+"d",t+"ing",t.replace(/e$/,"")+"ing",t+t.slice(-1)+"ing",t+t.slice(-1)+"ed"].concat(IRR[t]||[]);
+    if(forms.includes(lw)){vi++; return "<mark>"+esc(w)+"</mark>";} return esc(w);}).join("");
+}
 /* ---------- 教材パックの読み込み ---------- */
 async function importPack(file){
   const bar=$("impbar"),msg=$("impmsg"); bar.style.display="block"; msg.textContent="教材を読み込んでいます…";
@@ -252,7 +290,8 @@ async function importPack(file){
     const dj=zip.file("data.json"); if(!dj) throw new Error("data.json が見つかりません");
     const data=JSON.parse(await dj.async("string"));
     const names=Object.keys(zip.files).filter(n=>/^(a|h)\/.+\.mp3$/.test(n));
-    await DB.clear("files"); urlCache.forEach(u=>URL.revokeObjectURL(u)); urlCache=new Map();
+    if(names.length){ await DB.clear("files"); urlCache.forEach(u=>URL.revokeObjectURL(u)); urlCache=new Map(); }
+    else if(!(await DB.get("files","a/001.mp3"))) throw new Error("音声が入っていません。先に音声入りの教材パックを読み込んでください");
     let batch=[];
     for(let i=0;i<names.length;i++){
       const buf=await zip.file(names[i]).async("arraybuffer");
@@ -262,7 +301,7 @@ async function importPack(file){
     }
     await DB.put("kv","data",data); DATA=data;
     if(navigator.storage&&navigator.storage.persist) navigator.storage.persist();
-    msg.textContent=`読み込みました（例文 ${data.items.length}件、音声 ${names.length}件）`;
+    msg.textContent=names.length?`読み込みました（例文 ${data.items.length}件、音声 ${names.length}件）`:`例文データを更新しました（${data.items.length}件）。学習記録と音声はそのままです`;
     setTimeout(()=>{bar.style.display="none";renderHome();show("s-home")},600);
   }catch(e){ msg.textContent="読み込めませんでした："+e.message+"。ku-doushi-pack.zip を選んでいるか確認してください。"; bar.style.display="none"; }
 }
@@ -319,11 +358,11 @@ function nextCard(){
 async function playQ(){ $("disc").classList.add("playing"); await playQuestion(SET.mode,cur); $("disc").classList.remove("playing"); }
 $("disc").onclick=playQ;
 $("btn-reveal").onclick=()=>{
-  $("a-head").textContent=cur.head; $("a-hja").textContent=cur.headJa; $("a-en").textContent=cur.en; $("a-ja").textContent=cur.ja;
+  $("a-head").innerHTML=markVerb(cur.head,cur.verb); $("a-hja").textContent=cur.headJa; $("a-verb").textContent="句動詞："+(cur.verb||""); $("a-en").textContent=cur.en; $("a-ja").textContent=cur.ja;
   $("ans").classList.add("on"); $("btn-reveal").classList.add("hidden"); $("grade").classList.remove("hidden");
   playAnswer(SET.mode,cur);
 };
-$("p-en").onclick=()=>playClip(aName(cur)); $("p-ja").onclick=()=>speakJa(cur.ja); $("p-head").onclick=()=>playClip(hName(cur));
+$("p-en").onclick=()=>playClip(aName(cur)); $("p-ja").onclick=()=>speakJa(cur.ja); $("p-phrase").onclick=()=>speakEn(cur.head); $("p-verb").onclick=()=>playClip(hName(cur));
 document.querySelectorAll(".g").forEach(b=>b.onclick=async()=>{
   const g=Number(b.dataset.g), m=SET.mode, t=today(); PROG[m]=PROG[m]||{};
   const s=PROG[m][cur.id]||{box:0,due:t,seen:0};
@@ -341,7 +380,6 @@ $("btn-home").onclick=()=>{renderHome();show("s-home")};
 
 /* ---------- 聞き流し ---------- */
 let L={on:false,paused:false,list:[],i:0,token:0}, wake=null;
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
 async function lockScreen(){try{if("wakeLock" in navigator)wake=await navigator.wakeLock.request("screen")}catch(e){}}
 function startListen(){
   const pool=DATA.items.filter(inRange); if(!pool.length)return;
@@ -353,10 +391,10 @@ async function runListen(tok){
     if(L.paused){await wait(300);continue;}
     const it=L.list[L.i];
     $("lcount").textContent=`${L.i+1} / ${L.list.length}`; $("lprog").style.width=Math.round(L.i/L.list.length*100)+"%";
-    $("l-head").textContent=""; $("l-hja").textContent=""; $("l-en").textContent=""; $("l-ja").textContent="";
+    $("l-head").textContent=""; $("l-hja").textContent=""; $("l-verb").textContent=""; $("l-en").textContent=""; $("l-ja").textContent="";
     $("lstate").textContent="問題"; await playQuestion(m,it); if(tok!==L.token)return;
     $("lstate").textContent="考える時間"; await wait(Number(SET.gap)*1000); if(tok!==L.token)return;
-    $("l-head").textContent=it.head; $("l-hja").textContent=it.headJa; $("l-en").textContent=it.en; $("l-ja").textContent=it.ja;
+    $("l-head").innerHTML=markVerb(it.head,it.verb); $("l-hja").textContent=it.headJa; $("l-verb").textContent="句動詞："+(it.verb||""); $("l-en").textContent=it.en; $("l-ja").textContent=it.ja;
     $("lstate").textContent="答え"; await playAnswer(m,it); if(tok!==L.token)return;
     await wait(1500); if(!L.paused) L.i++;
   }
@@ -366,6 +404,18 @@ $("btn-listen").onclick=startListen;
 $("btn-lpause").onclick=()=>{L.paused=!L.paused; $("btn-lpause").textContent=L.paused?"再開":"一時停止"; if(L.paused)stopAll();};
 $("btn-lnext").onclick=()=>{stopAll(); L.i=Math.min(L.i+1,L.list.length-1); L.paused=false; $("btn-lpause").textContent="一時停止"; L.token++; runListen(L.token);};
 $("btn-lquit").onclick=()=>{L.on=false;L.token++;stopAll();try{wake&&wake.release()}catch(e){};renderHome();show("s-home")};
+
+/* ---------- 一覧 ---------- */
+function renderList(){
+  const q=$("q").value.trim().toLowerCase(), box=$("list");
+  const items=DATA.items.filter(it=>!q||(it.head+" "+(it.verb||"")+" "+it.headJa+" "+it.en+" "+it.ja).toLowerCase().includes(q)).slice(0,120);
+  box.innerHTML=items.map(it=>`<button class="li" data-id="${it.id}"><span class="n">${it.id}</span><div class="p">${markVerb(it.head,it.verb)}</div><div class="pj">${esc(it.headJa)}</div><div class="ex"><div class="en">${esc(it.en)}</div><div class="pj">${esc(it.ja)}</div></div></button>`).join("")
+    || '<p class="sub">見つかりませんでした。別の言葉で探してみてください。</p>';
+  box.querySelectorAll(".li").forEach(b=>b.onclick=()=>{const it=DATA.items.find(x=>x.id==b.dataset.id); const open=b.classList.toggle("open"); if(open) speakEn(it.head);});
+}
+$("btn-list").onclick=()=>{$("q").value="";renderList();show("s-list")};
+$("q").oninput=renderList;
+$("btn-lback").onclick=()=>{stopAll();renderHome();show("s-home")};
 
 /* ---------- 設定・バックアップ ---------- */
 $("btn-settings").onclick=()=>{$("rate").value=String(SET.rate);$("gap").value=String(SET.gap);$("hide").value=String(SET.hide);$("s-msg").textContent="";show("s-settings")};
