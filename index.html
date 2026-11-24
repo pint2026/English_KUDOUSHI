@@ -125,6 +125,9 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
     <div><label class="f" for="range">範囲</label><select id="range"></select></div>
     <div><label class="f" for="size">1回の問題数</label><select id="size"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></div>
   </div>
+  <div class="row" style="margin-top:10px">
+    <div style="flex:1"><label class="f" for="order">出題順</label><select id="order"><option value="smart">おまかせ（復習を優先）</option><option value="seq">番号順</option><option value="rand">ランダム</option></select></div>
+  </div>
   <p class="sub" id="due-info" style="margin-top:10px"></p>
   <div class="stack">
     <button class="btn" id="btn-start">練習を始める</button>
@@ -236,7 +239,7 @@ const MODES=[
 const INTERVALS=[0,1,3,7,14,30,60]; // 箱ごとの次回までの日数
 const MASTER_BOX=4;                 // 4回連続で「覚えた」（間隔をあけて）でマスター
 
-let DATA=null, PROG={}, SET={rate:1,gap:4,hide:1,mode:"e2j",range:"all",size:20};
+let DATA=null, PROG={}, SET={rate:1,gap:4,hide:1,mode:"e2j",range:"all",size:20,order:"smart"};
 const $=id=>document.getElementById(id);
 const today=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*60000)/86400000);
 
@@ -323,18 +326,25 @@ function renderHome(){
   }
   const r=$("range"); if(!r.options.length){ r.add(new Option("すべて（1〜"+DATA.items.length+"）","all"));
     for(let a=1;a<=DATA.items.length;a+=50){const b=Math.min(a+49,DATA.items.length);r.add(new Option(`${a}〜${b}`,`${a}-${b}`))} }
-  r.value=SET.range; $("size").value=String(SET.size);
+  r.value=SET.range; $("size").value=String(SET.size); $("order").value=SET.order||"smart";
   const t=today(), pool=DATA.items.filter(inRange);
   const due=pool.filter(it=>{const s=st(SET.mode,it.id);return s&&s.due<=t}).length, fresh=pool.filter(it=>!st(SET.mode,it.id)).length;
-  $("due-info").textContent=`今日の復習 ${due}件・まだ出ていない例文 ${fresh}件`;
+  const ord=SET.order||"smart";
+  $("due-info").textContent = ord==="smart"
+    ? `今日の復習 ${due}件・まだ出ていない例文 ${fresh}件`
+    : (ord==="rand" ? `この範囲の ${pool.length}件 からランダムに出題します` : `この範囲の ${pool.length}件 を番号順に出題します`);
 }
 $("range").onchange=e=>{SET.range=e.target.value;saveSet();renderHome()};
 $("size").onchange=e=>{SET.size=Number(e.target.value);saveSet()};
+$("order").onchange=e=>{SET.order=e.target.value;saveSet();renderHome()};
+function shuffle(a){const r=a.slice();for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[r[i],r[j]]=[r[j],r[i]]}return r;}
 
 /* ---------- 練習 ---------- */
 let Q=[],qi=0,cur=null,stats={ok:0,soso:0,ng:0},total=0;
 function buildQueue(mode,limit){
-  const t=today(), pool=DATA.items.filter(inRange);
+  const t=today(), pool=DATA.items.filter(inRange), ord=SET.order||"smart";
+  if(ord==="seq")  return pool.slice(0,limit);
+  if(ord==="rand") return shuffle(pool).slice(0,limit);
   const due=pool.filter(it=>{const s=st(mode,it.id);return s&&s.due<=t}).sort((a,b)=>st(mode,a.id).due-st(mode,b.id).due);
   const fresh=pool.filter(it=>!st(mode,it.id));
   return due.concat(fresh).slice(0,limit);
@@ -382,7 +392,8 @@ $("btn-home").onclick=()=>{renderHome();show("s-home")};
 let L={on:false,paused:false,list:[],i:0,token:0}, wake=null;
 async function lockScreen(){try{if("wakeLock" in navigator)wake=await navigator.wakeLock.request("screen")}catch(e){}}
 function startListen(){
-  const pool=DATA.items.filter(inRange); if(!pool.length)return;
+  let pool=DATA.items.filter(inRange); if(!pool.length)return;
+  if((SET.order||"smart")==="rand") pool=shuffle(pool);
   L={on:true,paused:false,list:pool,i:0,token:L.token+1}; show("s-listen"); lockScreen(); runListen(L.token);
 }
 async function runListen(tok){
