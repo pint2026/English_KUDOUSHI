@@ -200,6 +200,12 @@ label.f{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
   <select id="gap"><option>2</option><option>3</option><option selected>4</option><option>6</option><option>8</option></select>
   <label class="f" for="hide">答えを見る前に文字を</label>
   <select id="hide"><option value="1" selected>隠す（耳だけで答える）</option><option value="0">問題の文字だけ見せる</option></select>
+  <h2>読み上げの確認</h2>
+  <p class="sub">和訳やフレーズの読み上げが鳴らないときは、ここで確かめてください。鳴らない場合はいったんアプリを閉じて開き直すと戻ります。</p>
+  <div class="stack" style="margin-top:10px;padding-top:0">
+    <button class="btn ghost" id="btn-tts-test">読み上げをテストする</button>
+  </div>
+  <p class="sub" id="tts-msg" style="margin-top:10px"></p>
   <h2>学習記録のバックアップ</h2>
   <p class="sub">記録はこのiPhoneの中だけにあります。機種変更や万一に備えて、ときどき書き出しておくと安心です。</p>
   <div class="stack" style="margin-top:10px;padding-top:0">
@@ -255,20 +261,52 @@ async function clipURL(name){ if(urlCache.has(name))return urlCache.get(name);
   const b=await DB.get("files",name); if(!b) return null; const u=URL.createObjectURL(b); urlCache.set(name,u); return u;}
 function stopAll(){try{player.pause()}catch(e){} try{speechSynthesis.cancel()}catch(e){} }
 function playClip(name){return new Promise(async res=>{stopAll(); const u=await clipURL(name); if(!u)return res();
-  player.onended=()=>res(); player.onerror=()=>res(); player.src=u; player.currentTime=0;
-  const p=player.play(); if(p&&p.catch)p.catch(()=>res());});}
+  const fin=()=>{lastClipAt=Date.now(); res()};
+  player.onended=fin; player.onerror=fin; player.src=u; player.currentTime=0;
+  const p=player.play(); if(p&&p.catch)p.catch(fin);});}
 let jaVoice=null, enVoice=null;
 function pickVoice(){const v=speechSynthesis.getVoices().filter(v=>/^ja/i.test(v.lang));
   jaVoice=v.find(x=>/Kyoko|O-ren|Hattori|Siri/i.test(x.name))||v[0]||null;
   const e=speechSynthesis.getVoices().filter(v=>/^en[-_]US/i.test(v.lang));
   enVoice=e.find(x=>/Samantha|Ava|Allison|Nicky|Siri/i.test(x.name))||e[0]||null;}
 if("speechSynthesis" in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice;}
-function speakJa(text){return new Promise(res=>{stopAll(); if(!("speechSynthesis" in window))return res();
-  const u=new SpeechSynthesisUtterance(text); u.lang="ja-JP"; if(jaVoice)u.voice=jaVoice; u.rate=Number(SET.rate)||1;
-  u.onend=()=>res(); u.onerror=()=>res(); speechSynthesis.speak(u); setTimeout(res, 3000+text.length*350);});}
-function speakEn(text){return new Promise(res=>{stopAll(); if(!("speechSynthesis" in window))return res();
-  const u=new SpeechSynthesisUtterance(text); u.lang="en-US"; if(enVoice)u.voice=enVoice; u.rate=(Number(SET.rate)||1)*0.95;
-  u.onend=()=>res(); u.onerror=()=>res(); speechSynthesis.speak(u); setTimeout(res, 3000+text.length*120);});}
+/* iOS対策：最初のタップで読み上げ機能を起こしておく */
+let ttsUnlocked=false;
+function ttsUnlock(){ if(ttsUnlocked||!("speechSynthesis" in window))return;
+  try{ const u=new SpeechSynthesisUtterance(" "); u.volume=0; u.lang="ja-JP"; speechSynthesis.speak(u); ttsUnlocked=true; }catch(e){} }
+document.addEventListener("touchend",ttsUnlock,true); document.addEventListener("click",ttsUnlock,true);
+/* iOS対策：MP3の直後やバックグラウンド復帰後に読み上げが黙る問題に、
+   少し待つ・resume する・始まらなければ組み直す、の3段構えで対処する */
+let lastClipAt=0;
+function speakWith(text,lang,voice,rate,perChar){
+  return new Promise(res=>{
+    if(!("speechSynthesis" in window)||!text) return res();
+    try{player.pause()}catch(e){}
+    let done=false,started=false,tries=0,kick=0,hard=0;
+    const finish=()=>{ if(done)return; done=true; clearInterval(kick); clearTimeout(hard); res(); };
+    const go=()=>{
+      tries++;
+      try{speechSynthesis.cancel()}catch(e){}
+      const wait0 = tries>1 ? 400 : Math.max(150, 350-(Date.now()-lastClipAt));
+      setTimeout(()=>{
+        if(done)return;
+        let u;
+        try{ u=new SpeechSynthesisUtterance(text); }catch(e){ return finish(); }
+        u.lang=lang; if(voice)u.voice=voice; u.rate=rate;
+        u.onstart=()=>{started=true};
+        u.onend=finish;
+        u.onerror=()=>{ if(!started&&tries<2){go()} else finish(); };
+        try{ speechSynthesis.resume(); speechSynthesis.speak(u); }catch(e){ return finish(); }
+        setTimeout(()=>{ if(done||started)return; if(tries<2){go()} else {setTimeout(()=>{if(!started)finish()},1200)} }, 900);
+      }, wait0);
+    };
+    kick=setInterval(()=>{ try{ if(speechSynthesis.paused) speechSynthesis.resume(); }catch(e){} },800);
+    hard=setTimeout(finish, 5000+text.length*perChar);
+    go();
+  });
+}
+function speakJa(text){ return speakWith(text,"ja-JP",jaVoice,Number(SET.rate)||1,350); }
+function speakEn(text){ return speakWith(text,"en-US",enVoice,(Number(SET.rate)||1)*0.95,120); }
 const aName=it=>`a/${String(it.id).padStart(3,"0")}.mp3`, hName=it=>`h/${it.file}.mp3`;
 function playQuestion(mode,it){ if(mode==="e2j")return playClip(aName(it)); if(mode==="p2j")return speakEn(it.head);
   if(mode==="j2e")return speakJa(it.ja); return speakJa(it.headJa);}
@@ -429,7 +467,19 @@ $("q").oninput=renderList;
 $("btn-lback").onclick=()=>{stopAll();renderHome();show("s-home")};
 
 /* ---------- 設定・バックアップ ---------- */
-$("btn-settings").onclick=()=>{$("rate").value=String(SET.rate);$("gap").value=String(SET.gap);$("hide").value=String(SET.hide);$("s-msg").textContent="";show("s-settings")};
+$("btn-tts-test").onclick=async()=>{
+  const m=$("tts-msg");
+  if(!("speechSynthesis" in window)){m.textContent="このブラウザは読み上げに対応していません。";return;}
+  m.textContent="テスト中…「テストです」と聞こえますか？";
+  try{speechSynthesis.cancel()}catch(e){}
+  await speakJa("テストです");
+  await wait(300);
+  await speakEn("This is a test.");
+  const n=speechSynthesis.getVoices().filter(v=>/^ja/i.test(v.lang)).length;
+  m.textContent = n ? "テストを再生しました。聞こえなかったときは、アプリを閉じて開き直してからもう一度お試しください。"
+                    : "この iPhone に日本語の音声が見つかりません。設定アプリ →「アクセシビリティ」→「読み上げコンテンツ」→「声」から日本語の声を追加してください。";
+};
+$("btn-settings").onclick=()=>{$("tts-msg").textContent="";$("rate").value=String(SET.rate);$("gap").value=String(SET.gap);$("hide").value=String(SET.hide);$("s-msg").textContent="";show("s-settings")};
 $("btn-sback").onclick=()=>{renderHome();show("s-home")};
 ["rate","gap","hide"].forEach(k=>$(k).onchange=e=>{SET[k]=Number(e.target.value);saveSet()});
 $("btn-export").onclick=async()=>{
